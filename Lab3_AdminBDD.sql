@@ -107,29 +107,34 @@ CREATE TRIGGER TR_UPDATE_TOTAL_INS
 ON movimientos.[DETALLE_PEDIDO2]
 AFTER INSERT
 AS
-DECLARE @DEUDOR varchar(3)
-	BEGIN
-		UPDATE	movimientos.PEDIDO2
-		SET TOTAL =(
+DECLARE @DEUDA decimal(10,2)
+DECLARE @ID_DEUDOR varchar(3)
+	BEGIN	 
+		-- Actualiza el total
+		SET @DEUDA =(
 			SELECT SUM(d.PRECIO_UNITARIO)
+			FROM movimientos.DETALLE_PEDIDO2 d, inserted I
+			WHERE d.ID_PEDIDO = I.ID_PEDIDO);
+		UPDATE	movimientos.PEDIDO2
+		SET TOTAL =	 @DEUDA
+		/*	(SELECT SUM(d.PRECIO_UNITARIO)
 			FROM movimientos.DETALLE_PEDIDO2 as d
-			WHERE d.ID_PEDIDO = I.ID_PEDIDO)
+			WHERE d.ID_PEDIDO = I.ID_PEDIDO)  */
 		FROM movimientos.DETALLE_PEDIDO2 AS dp
 		INNER JOIN inserted AS I
 		ON dp.ID_PEDIDO = I.ID_PEDIDO
 		WHERE movimientos.PEDIDO2.ID_PEDIDO = I.ID_PEDIDO;
-		-- Actualizando tabla deudor
-		SET @DEUDOR = (SELECT P.ID_CLIENTE FROM movimientos.PEDIDO2 p, inserted i 
-						WHERE P.ID_PEDIDO = i.ID_PEDIDO);
-		-- Valida que el garante no tenga deudas
-		IF EXISTS ( SELECT @DEUDOR FROM movimientos.DEUDOR2 WHERE SALDO_DEUDOR = 0)
-		BEGIN  
-			UPDATE movimientos.DEUDOR2
-			SET CODIGO_GARANTE = @DEUDOR;
-		END		
-		ELSE
-			RAISERROR('Garante a registrar tiene deudas',10,1) WITH NOWAIT;
-		--SET CODIGO_GARANTE = 
+		-- Actualiza deuda
+		/*
+		SET @DEUDA = (SELECT p.TOTAL 
+					FROM movimientos.PEDIDO2 P, movimientos.DETALLE_PEDIDO2 d 
+					WHERE p.ID_PEDIDO = d.ID_PEDIDO)
+		*/
+		SET @ID_DEUDOR = (SELECT p.ID_CLIENTE FROM movimientos.PEDIDO2 p, inserted I 
+							WHERE p.ID_PEDIDO = I.ID_PEDIDO)
+		UPDATE movimientos.DEUDOR2
+		SET SALDO_DEUDOR = @DEUDA
+		WHERE COD_CLI = @ID_DEUDOR;
 	END
 GO
 
@@ -145,13 +150,14 @@ SELECT * FROM movimientos.DETALLE_PEDIDO2;
 
 -- Ejercicio 6:
 -- Crear tabla DEUDOR
+/*
 CREATE TABLE movimientos.DEUDOR2 ( 
 COD_CLI			     varchar(3)           not null, 
 CODIGO_GARANTE	     varchar(3)	          null, 
 LIMITE_CREDITO       decimal(10,2)        null, 
 SALDO_DEUDOR         decimal(10,2)        null, 
 )
-
+  */
 USE Pedidos;
 --Trigger para agregar un cliente con deuda (tipo de pago: credito)
 GO
@@ -159,17 +165,47 @@ CREATE TRIGGER TR_INSERTAR_DEUDOR
 ON movimientos.PEDIDO2
 AFTER INSERT
 AS
-DECLARE @TIPO varchar(3)
+DECLARE @TIPO varchar(10)
 	BEGIN
 	SET @TIPO = (SELECT I.TipoPed FROM inserted AS I)
-	if @TIPO = 'Credito'
+	IF @TIPO LIKE '%Credito%'
 		BEGIN
-			INSERT INTO movimientos.DEUDOR2 (COD_CLI,LIMITE_CREDITO)
-			SELECT I.ID_CLIENTE, 1000 
-			FROM inserted as I
+		INSERT INTO movimientos.DEUDOR2 (COD_CLI,LIMITE_CREDITO)
+		SELECT I.ID_CLIENTE, 1000 
+		FROM inserted as I;
 		END
+	ELSE
+		PRINT('No es credito');
 	END
 GO
 
--- Trigger para actualizar cliente dedudor en tabla deudor
-		
+GO
+CREATE TRIGGER TR_GARANTE
+ON movimientos.DEUDOR2
+FOR UPDATE
+AS
+DECLARE @GARANTE varchar(3)
+	BEGIN
+		SET @GARANTE = (SELECT CODIGO_GARANTE FROM inserted)
+		-- Verifica si el garante no consta en la tabla deudor 
+		IF EXISTS (SELECT 1 FROM movimientos.DEUDOR2 WHERE COD_CLI = @GARANTE)
+			PRINT('Garante a registrar tiene deudas');
+	END
+GO
+
+-- Probando triggers
+SELECT * FROM movimientos.PEDIDO2;
+SELECT * FROM movimientos.DEUDOR2;
+SELECT * FROM movimientos.DETALLE_PEDIDO2;
+DELETE FROM movimientos.PEDIDO2	where ID_PEDIDO = 'R06';
+DELETE FROM movimientos.DEUDOR2
+DELETE FROM movimientos.DETALLE_PEDIDO2 WHERE ID_PEDIDO = 'R06';
+
+INSERT INTO movimientos.PEDIDO2 VALUES ('R06','10/03/2018',null,'C02','Credito');
+
+INSERT INTO movimientos.DETALLE_PEDIDO2 VALUES (1,1.30,2,'R06','P03');
+INSERT INTO movimientos.DETALLE_PEDIDO2 VALUES (2,2.50,1,'R06','P04');
+
+-- INSERTNDO GARANTE PARA UN DEUDOR
+UPDATE movimientos.DEUDOR2 (CODIGO_GARANTE, COD_CLI) 
+SET CODIGO_GARANTE ='C01'
